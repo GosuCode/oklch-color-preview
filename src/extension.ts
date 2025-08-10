@@ -1,16 +1,15 @@
 import * as vscode from 'vscode';
+import * as culori from 'culori';
 
 export function activate(context: vscode.ExtensionContext) {
 	const decorationTypeCache: vscode.TextEditorDecorationType[] = [];
 
 	function updateDecorations(editor: vscode.TextEditor) {
-		// Clear previous decorations
 		decorationTypeCache.forEach(d => d.dispose());
 		decorationTypeCache.length = 0;
 
 		const text = editor.document.getText();
-		const regex = /oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\)/gi;
-		const decorations: vscode.DecorationOptions[] = [];
+		const regex = /oklch\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+%?))?\s*\)/gi;
 
 		let match;
 		while ((match = regex.exec(text))) {
@@ -18,17 +17,51 @@ export function activate(context: vscode.ExtensionContext) {
 			const endPos = editor.document.positionAt(match.index + match[0].length);
 			const range = new vscode.Range(startPos, endPos);
 
-			// Convert to CSS color string
-			const colorString = match[0];
+			// Parse OKLCH components
+			const L = parseFloat(match[1]);
+			const C = parseFloat(match[2]);
+			const h = parseFloat(match[3]);
+			const alpha = match[4] ? parseFloat(match[4].replace('%', '')) / 100 : 1;
+
+			// Convert OKLCH to sRGB
+			const oklchColor = { l: L, c: C, h: h, mode: 'oklch' as const };
+			const rgb = culori.rgb(oklchColor);
+
+			if (!rgb || rgb.r === null) {
+				continue; // skip invalid colors
+			}
+
+			// Convert rgb [0-1] to CSS rgba()
+			const r = Math.round(rgb.r * 255);
+			const g = Math.round(rgb.g * 255);
+			const b = Math.round(rgb.b * 255);
+
+			// Clamp values between 0-255
+			if ([r, g, b].some(c => c < 0 || c > 255)) {
+				continue;
+			}
+
+			const cssColor = alpha < 1 ? `rgba(${r},${g},${b},${alpha})` : `rgb(${r},${g},${b})`;
+
+			// Debug logging for problematic colors
+			if (L === 0 && C === 0) {
+				console.log(`OKLCH Debug - L:${L}, C:${C}, h:${h}, alpha:${alpha}`);
+				console.log(`RGB: r:${r}, g:${g}, b:${b}`);
+				console.log(`CSS Color: ${cssColor}`);
+			}
+
+			// Create a more visible border based on the color
+			const isDark = (r + g + b) / 3 < 128;
+			const borderColor = isDark ? '#fff' : '#000';
 
 			const decorationType = vscode.window.createTextEditorDecorationType({
 				before: {
 					contentText: ' ',
-					backgroundColor: colorString,
+					backgroundColor: cssColor,
 					margin: '0 4px 0 0',
 					width: '12px',
 					height: '12px',
-					border: '1px solid #ccc'
+					border: `1px solid ${borderColor}`
 				}
 			});
 
